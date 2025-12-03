@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>計程車收據產生器</title>
+    <style>
+        /* --- Reset & Layout --- */
+        body {
+            font-family: "Microsoft JhengHei", "Heiti TC", sans-serif;
+            background-color: #f4f5f7;
+            display: flex;
+            justify-content: center;
+            padding: 40px 20px;
+            margin: 0;
+            color: #333;
+        }
+
+        .workspace {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 30px;
+            background: white;
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.08); /* 讓陰影柔和一點，比較現代 */
+            max-width: 1100px;
+            width: 100%;
+        }
+
+        /* --- Panel: Inputs --- */
+        .panel-controls {
+            flex: 1;
+            min-width: 320px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .panel-controls h2 {
+            margin: 0 0 10px 0;
+            font-size: 24px;
+            border-bottom: 3px solid #007bff;
+            display: inline-block;
+            padding-bottom: 5px;
+        }
+
+        .group-label {
+            font-size: 13px;
+            font-weight: 700;
+            color: #007bff;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 10px;
+        }
+
+        .input-row label {
+            display: block;
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 6px;
+            color: #444;
+        }
+
+        input[type="text"], 
+        input[type="number"], 
+        input[type="date"] {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 15px;
+            transition: border-color 0.2s;
+            box-sizing: border-box; /* 避免 padding 撐破寬度 */
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+
+        .radio-options {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .radio-options label {
+            font-weight: normal;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+        }
+
+        /* --- Button --- */
+        .btn-download {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 14px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: auto; /* 推到底部 */
+            transition: background 0.2s;
+        }
+        .btn-download:hover { background-color: #0056b3; }
+
+        /* --- Panel: Preview --- */
+        .panel-preview {
+            flex: 1.5;
+            min-width: 500px;
+            background: #eee;
+            border-radius: 8px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 20px;
+            overflow: auto;
+        }
+
+        canvas {
+            background: white;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="workspace">
+        <div class="panel-controls">
+            <h2>收據資訊</h2>
+            
+            <div>
+                <div class="input-row">
+                    <label>日期 (Date)</label>
+                    <input type="date" id="dateInput">
+                </div>
+            </div>
+
+            <div>
+                <div class="group-label">司機資訊</div>
+                <div class="input-row">
+                    <label>司機姓名</label>
+                    <input type="text" id="driverInput" placeholder="例如：陳大明">
+                </div>
+                <div class="input-row" style="margin-top: 10px;">
+                    <label>車號</label>
+                    <input type="text" id="carNoInput" placeholder="例如：TDC-8888">
+                </div>
+            </div>
+
+            <div>
+                <div class="group-label">報帳抬頭</div>
+                <div class="input-row">
+                    <label>買受人 (Received From)</label>
+                    <input type="text" id="buyerInput">
+                </div>
+                <div class="input-row" style="margin-top: 10px;">
+                    <label>統一編號 (Tax ID)</label>
+                    <input type="text" id="taxIdInput">
+                </div>
+                <div class="input-row" style="margin-top: 10px;">
+                    <label>金額 (Total)</label>
+                    <input type="number" id="amountInput" placeholder="例如：1200">
+                </div>
+            </div>
+
+            <div>
+                <div class="group-label">行程內容</div>
+                <div class="radio-options">
+                    <label><input type="radio" name="type" value="send" checked> 送機 (To Airport)</label>
+                    <label><input type="radio" name="type" value="pickup"> 接機 (From Airport)</label>
+                    <label><input type="radio" name="type" value="other"> 其他 (Others)</label>
+                </div>
+                <input type="text" id="otherTextInput" placeholder="請輸入說明" style="display:none; margin-top:10px;">
+            </div>
+
+            <div class="input-row">
+                <label>備註 (Remarks)</label>
+                <input type="text" id="noteInput" placeholder="例如：出差去驗貨">
+            </div>
+
+            <button class="btn-download" onclick="downloadReceipt()">下載 PNG 收據</button>
+        </div>
+
+        <div class="panel-preview">
+            <canvas id="receiptCanvas" width="800" height="700"></canvas>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * CONFIG: 預設值設定區
+         * 如果公司改名或統編變更，改這裡就好
+         */
+        const DEFAULTS = {
+            buyer: "威禧股份有限公司",
+            taxId: "82956208"
+        };
+
+        // DOM Elements cache
+        const el = {
+            canvas: document.getElementById('receiptCanvas'),
+            date: document.getElementById('dateInput'),
+            driver: document.getElementById('driverInput'),
+            carNo: document.getElementById('carNoInput'),
+            buyer: document.getElementById('buyerInput'),
+            taxId: document.getElementById('taxIdInput'),
+            amount: document.getElementById('amountInput'),
+            note: document.getElementById('noteInput'),
+            otherText: document.getElementById('otherTextInput'),
+            types: document.getElementsByName('type')
+        };
+        
+        const ctx = el.canvas.getContext('2d');
+
+        // Init: 填入預設值
+        function init() {
+            el.date.valueAsDate = new Date(); // 今天
+            el.buyer.value = DEFAULTS.buyer;
+            el.taxId.value = DEFAULTS.taxId;
+            
+            // 綁定所有 input 的監聽事件，有動靜就重畫
+            const inputs = [el.date, el.driver, el.carNo, el.buyer, el.taxId, el.amount, el.note, el.otherText];
+            inputs.forEach(i => i.addEventListener('input', render));
+            
+            // Radio button 特殊處理 (連動 "其他" 輸入框顯示)
+            el.types.forEach(radio => radio.addEventListener('change', () => {
+                el.otherText.style.display = (radio.value === 'other') ? 'block' : 'none';
+                render();
+            }));
+
+            // 第一次執行
+            render();
+        }
+
+        /**
+         * Core Render Function
+         * 負責重繪整張收據
+         */
+        function render() {
+            // 1. Reset Background
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, el.canvas.width, el.canvas.height);
+
+            // 2. Draw Header (標題區)
+            ctx.fillStyle = '#000';
+            ctx.textAlign = 'center';
+            
+            // "收據" - Times New Roman 比較有正式文件的感覺
+            ctx.font = 'bold 36px "Times New Roman", serif';
+            ctx.fillText('收    據', 400, 50);
+            
+            ctx.font = 'bold 20px "Times New Roman", serif';
+            ctx.fillText('RECEIPT', 400, 75);
+
+            // 右上角日期
+            renderDateSection();
+
+            // 綠色裝飾條 (模仿原始單據樣式)
+            ctx.fillStyle = '#eafaf1'; 
+            ctx.fillRect(20, 85, 760, 30);
+
+            // 3. Draw Body Content (主要欄位)
+            // 定義一些排版常數，方便微調位置
+            const LAYOUT = {
+                startX: 40,      // 左邊界
+                labelEngX: 40,   // 英文標籤對齊
+                lineStart: 200,  // 虛線起點
+                lineEnd: 760,    // 虛線終點
+                textIndent: 220, // 填寫內容起始點
+                rowY: 110,       // 第一行 Y 軸
+                gap: 55          // 行距
+            };
+
+            let curY = LAYOUT.rowY;
+
+            // --- Row: Driver ---
+            drawRowLabel('司 機 姓 名', 'DRIVER NAME', curY, LAYOUT);
+            drawRowContent(el.driver.value, curY, LAYOUT);
+            curY += LAYOUT.gap;
+
+            // --- Row: Car No ---
+            drawRowLabel('車           號', 'CAR NO.', curY, LAYOUT);
+            // 車號強制大寫比較好看
+            ctx.font = 'bold 20px "Arial", sans-serif';
+            ctx.fillText((el.carNo.value || '').toUpperCase(), LAYOUT.textIndent, curY + 5);
+            curY += LAYOUT.gap;
+
+            // --- Row: Buyer ---
+            drawRowLabel('今   收   到', 'RECEIVED FROM', curY, LAYOUT);
+            let buyerStr = el.buyer.value;
+            if (el.taxId.value) buyerStr += `  (統編: ${el.taxId.value})`;
+            drawRowContent(buyerStr, curY, LAYOUT);
+            curY += LAYOUT.gap;
+
+            // --- Row: Amount ---
+            drawRowLabel('共           計', 'TOTAL AMOUNT', curY, LAYOUT);
+            // NTD Prefix
+            ctx.font = '16px "Times New Roman", sans-serif';
+            ctx.fillText('NTD', LAYOUT.lineStart, curY + 15);
+            drawDashedLine(LAYOUT.lineStart + 40, curY + 10, LAYOUT.lineEnd, curY + 10);
+            
+            if (el.amount.value) {
+                ctx.font = 'bold 22px "Arial", sans-serif';
+                ctx.fillText(parseInt(el.amount.value).toLocaleString(), LAYOUT.lineStart + 60, curY + 5);
+            }
+            curY += LAYOUT.gap;
+
+            // --- Row: Payment Type (Checkboxes) ---
+            drawRowLabel('付 款 性 質', 'ACCOUNT FOR', curY, LAYOUT);
+            renderCheckboxes(curY, LAYOUT);
+            curY += 100; // Checkbox 區塊比較高
+
+            // --- Row: Remarks ---
+            drawRowLabel('備           註', 'REMARKS', curY, LAYOUT);
+            drawRowContent(el.note.value, curY, LAYOUT);
+
+            // 4. Draw Stamp (最後蓋章)
+            // 位置調整到右下角，稍微蓋到一點備註線比較自然
+            drawStamp(700, curY - 30);
+        }
+
+        // --- Sub-render Functions (模組化繪圖邏輯) ---
+
+        function renderDateSection() {
+            const d = new Date(el.date.value);
+            const dateStr = el.date.value ? 
+                `${d.getFullYear()} / ${(d.getMonth()+1).toString().padStart(2,'0')} / ${d.getDate().toString().padStart(2,'0')}` : '';
+
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#000';
+            
+            // Label
+            ctx.font = '16px "Microsoft JhengHei", sans-serif';
+            ctx.fillText('日 期', 580, 50);
+            ctx.font = '12px "Arial", sans-serif';
+            ctx.fillText('DATE', 580, 65);
+            
+            // Line & Value
+            drawDashedLine(630, 60, 780, 60);
+            ctx.textAlign = 'center';
+            ctx.font = '18px "Arial", sans-serif';
+            ctx.fillText(dateStr, 705, 55);
+        }
+
+        function drawRowLabel(zh, en, y, L) {
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#000';
+            ctx.font = '18px "Microsoft JhengHei", sans-serif';
+            ctx.fillText(zh, L.startX, y);
+            ctx.font = '12px "Times New Roman", sans-serif';
+            ctx.fillText(en, L.labelEngX, y + 15);
+            
+            // 預設劃一條底線
+            drawDashedLine(L.lineStart, y + 10, L.lineEnd, y + 10);
+        }
+
+        function drawRowContent(text, y, L) {
+            if (!text) return;
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#000';
+            ctx.font = '20px "Microsoft JhengHei", sans-serif';
+            ctx.fillText(text, L.textIndent, y + 5);
+        }
+
+        function renderCheckboxes(y, L) {
+            let type = '';
+            for(const r of el.types) { if(r.checked) type = r.value; }
+
+            const cbY = y - 5;
+            const x1 = L.lineStart;
+            
+            // Line 1
+            drawCheckbox(x1, cbY, type === 'send');
+            ctx.font = '16px "Microsoft JhengHei", sans-serif';
+            ctx.fillText('送機 (To Airport)', x1 + 30, cbY + 15);
+
+            drawCheckbox(x1 + 200, cbY, type === 'pickup');
+            ctx.fillText('接機 (From Airport)', x1 + 230, cbY + 15);
+
+            // Line 2
+            const row2Y = cbY + 35;
+            drawCheckbox(x1, row2Y, type === 'other');
+            ctx.fillText('其他 (Others):', x1 + 30, row2Y + 15);
+            
+            // "其他" 後面的輸入線
+            drawDashedLine(x1 + 140, row2Y + 15, L.lineEnd, row2Y + 15);
+            
+            if(type === 'other' && el.otherText.value) {
+                ctx.font = '18px "Microsoft JhengHei", sans-serif';
+                ctx.fillText(el.otherText.value, x1 + 150, row2Y + 10);
+            }
+        }
+
+        /**
+         * STAMP GENERATOR (Bonz Car Rental)
+         * 這是最難搞的部分，角度跟字距是 trial and error 調出來的
+         */
+        function drawStamp(x, y) {
+            ctx.save();
+            ctx.translate(x, y);
+            // 微微轉個角度 (-2度)，看起來像人蓋的
+            ctx.rotate(-2 * Math.PI / 180);
+
+            const RED = '#d93025'; 
+
+            // 1. 雙圈結構
+            ctx.beginPath();
+            ctx.arc(0, 0, 55, 0, 2 * Math.PI); // 外圈
+            ctx.strokeStyle = RED;
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.arc(0, 0, 48, 0, 2 * Math.PI); // 內圈
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // 2. 中央文字
+            ctx.fillStyle = RED;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            // 使用 PMingLiU (新細明體) 或 Serif 來模擬印章刻字感
+            ctx.font = 'bold 16px "Times New Roman", "PMingLiU", serif'; 
+            ctx.fillText('旅車', 0, -8);
+            ctx.fillText('專用章', 0, 12);
+
+            // 3. 底部梅花 Logo
+            drawPlumFlower(0, 35, RED);
+
+            // 4. 圓弧英文 (BONZ CAR RENTAL CO.)
+            // 半徑 51.5 剛好卡在兩圈中間
+            drawArcText("BONZ CAR RENTAL CO.", 51.5, RED);
+
+            ctx.restore();
+        }
+
+        // 畫梅花小圖示
+        function drawPlumFlower(x, y, color) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.fillStyle = color;
+            // 五瓣花
+            for (let i = 0; i < 5; i++) {
+                ctx.beginPath();
+                ctx.rotate(Math.PI * 2 / 5);
+                ctx.arc(0, 5, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            // 花蕊
+            ctx.beginPath();
+            ctx.arc(0, 0, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // 畫圓弧文字
+        function drawArcText(text, radius, color) {
+            ctx.font = 'bold 11px Arial, sans-serif'; 
+            ctx.fillStyle = color;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            // 角度計算：從左下 (-220度) 到右下，總共跨 260 度
+            // 這樣文字才會是正的，不會頭下腳上
+            const startAngle = -220 * (Math.PI / 180); 
+            const totalSpan = 260 * (Math.PI / 180);
+            const angleStep = totalSpan / (text.length - 1);
+
+            for (let i = 0; i < text.length; i++) {
+                const angle = startAngle + (i * angleStep);
+                ctx.save();
+                ctx.translate(Math.cos(angle) * radius, Math.sin(angle) * radius);
+                // 轉正文字: 當前角度 + 90度
+                ctx.rotate(angle + Math.PI / 2);
+                ctx.fillText(text[i], 0, 0);
+                ctx.restore();
+            }
+        }
+
+        // --- Utilities ---
+
+        function drawDashedLine(x1, y1, x2, y2) {
+            ctx.beginPath();
+            ctx.setLineDash([2, 4]); // 2px 實線, 4px 空白
+            ctx.strokeStyle = '#999';
+            ctx.lineWidth = 1;
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset
+        }
+
+        function drawCheckbox(x, y, isChecked) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 1;
+            ctx.rect(x, y, 18, 18); // 18px 方框
+            ctx.stroke();
+            
+            if (isChecked) {
+                // 手畫一個勾勾
+                ctx.beginPath();
+                ctx.moveTo(x + 3, y + 9);
+                ctx.lineTo(x + 8, y + 14);
+                ctx.lineTo(x + 16, y + 4);
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        function downloadReceipt() {
+            const link = document.createElement('a');
+            // 檔名加 timestamp 避免重複
+            link.download = `Receipt_Bonz_${Date.now()}.png`;
+            link.href = el.canvas.toDataURL();
+            link.click();
+        }
+
+        // Start
+        init();
+
+    </script>
+</body>
+</html>
